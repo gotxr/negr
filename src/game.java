@@ -3,13 +3,10 @@ import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
+
 public class game extends JFrame {
 
-    BufferedImage knopka1;
-    BufferedImage knopka2;
-    BufferedImage knopka3;
-    BufferedImage fon;
-
+    BufferedImage knopka1, knopka2, knopka3, fon;
     int button1X, button1Y, buttonWidth, buttonHeight;
 
     game() {
@@ -29,8 +26,18 @@ public class game extends JFrame {
 
                 if (mouseX >= button1X && mouseX <= button1X + buttonWidth &&
                         mouseY >= button1Y && mouseY <= button1Y + buttonHeight) {
-                    dispose();
-                    second.main(null);
+
+                    dispose(); // закрываем заставку
+
+                    Player player = new Player(0, 0);
+                    player.image = ImageLoader.loadImage("/assets/pers1.png");
+                    second.startGlobalTimers(player);
+
+                    JFrame frame = new JFrame("Survival Game");
+                    frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+                    frame.add(new second(player));
+                    frame.setExtendedState(JFrame.MAXIMIZED_BOTH);
+                    frame.setVisible(true);
                 }
             }
         });
@@ -55,6 +62,6 @@ public class game extends JFrame {
     }
 
     public static void main(String[] args) {
-        game w = new game();
+        new game();
     }
 }
