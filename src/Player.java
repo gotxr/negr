@@ -1,4 +1,7 @@
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
+import java.util.List;
+import javax.swing.Timer;
 
 public class Player {
     public int x, y;
@@ -12,10 +15,46 @@ public class Player {
     public long dayStartTime = System.currentTimeMillis();
     public static final long DAY_DURATION = 30_000;
     public static final long NIGHT_DURATION = 30_000;
+    public long lastHitTime = 0;
+    public static final long INVINCIBILITY_DURATION = 1000; // 1 секунда
 
-    public int selectedInvRow = 0;
-    public int selectedInvCol = 0;
-    public int selectedHotbarSlot = 0; // 0–5
+    public boolean isSelectingHotbar = false;
+    public int selectedRow = 0;
+    public int selectedCol = 0;
+
+    public int[] appleTreeStages = {0, 0};
+    public long[] appleTreeLastUpdateTime = {
+            System.currentTimeMillis(),
+            System.currentTimeMillis()
+    };
+
+    public List<long[]> sprouts = new ArrayList<>();
+
+    public int[][] trees = {
+            {300, 400},
+            {500, 300},
+            {700, 500},
+            {200, 200},
+            null, null, null
+    };
+
+    public int[][] stones = {
+            {400, 300},
+            {600, 200},
+            {800, 400},
+            {300, 500},
+            null, null, null
+    };
+
+    // Таймеры (для паузы)
+    public Timer hungerTimer;
+    public Timer thirstTimer;
+    public Timer healthTimer;
+    public Timer dayNightTimer;
+    public Timer appleTreeTimer;
+    public long pauseStartTime = 0; // время начала паузы
+    public long lastEnemySpawnTime = 0;
+    public Timer gameTimer = null; // таймер локации
 
     public boolean addItem(BufferedImage icon, String type, int count) {
         //1 Ищем существующий слот с таким же типом

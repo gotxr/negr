@@ -16,6 +16,7 @@ public class Inventory extends JPanel implements KeyListener {
         this.parentFrame = parent;
         this.gamePanel = game;
         this.player = p;
+        second.pauseTimers(player);
 
         setFocusable(true);
         addKeyListener(this);
@@ -39,23 +40,21 @@ public class Inventory extends JPanel implements KeyListener {
         int startX = (getWidth() - (6 * slotSize + 5 * spacing)) / 2;
         int startY = getHeight() / 2 - 200;
 
-        // Рисуем основной инвентарь (3x6)
+        // Рисуем основной инвентарь
         for (int row = 0; row < 3; row++) {
             for (int col = 0; col < 6; col++) {
                 int x = startX + col * (slotSize + spacing);
                 int y = startY + row * (slotSize + spacing);
-
-                // Рисуем рамку слота
                 g.drawImage(slotImage, x, y, slotSize, slotSize, null);
 
                 // Получаем предмет из инвентаря игрока
                 Item item = player.inventory[row][col];
 
                 if (item != null && !item.isEmpty()) {
-                    // Рисуем иконку предмета
+                    //иконка
                     g.drawImage(item.icon, x + 18, y + 18, slotSize - 36, slotSize - 36, null);
 
-                    // Рисуем количество в правом нижнем углу
+                    //количество
                     g.setColor(Color.BLACK);
                     g.setFont(new Font("Arial", Font.BOLD, 14));
                     g.drawString(String.valueOf(item.count), x + slotSize - 21, y + slotSize - 8);
@@ -63,11 +62,7 @@ public class Inventory extends JPanel implements KeyListener {
             }
         }
 
-        int selX = startX + player.selectedInvCol * (slotSize + spacing);
-        int selY = startY + player.selectedInvRow * (slotSize + spacing);
-        g.setColor(Color.YELLOW);
-        g.drawRect(selX - 2, selY - 2, slotSize + 4, slotSize + 4);
-
+        // хотбар
         int hotbarY = getHeight() - slotSize - 20;
         int hotbarStartX = (getWidth() - (6 * slotSize + 5 * spacing)) / 2;
 
@@ -86,40 +81,40 @@ public class Inventory extends JPanel implements KeyListener {
             }
         }
 
-        int hotbarSelX = hotbarStartX + player.selectedHotbarSlot * (slotSize + spacing);
-        g.setColor(Color.CYAN);
-        g.drawRect(hotbarSelX - 2, hotbarY - 2, slotSize + 4, slotSize + 4);
+        //рамка выбора
+        g.setColor(Color.YELLOW);
+        if (player.isSelectingHotbar) {
+            int x = hotbarStartX + player.selectedCol * (slotSize + spacing);
+            g.drawRect(x - 2, hotbarY - 2, slotSize + 4, slotSize + 4);
+        } else {
+            int x = startX + player.selectedCol * (slotSize + spacing);
+            int y = startY + player.selectedRow * (slotSize + spacing);
+            g.drawRect(x - 2, y - 2, slotSize + 4, slotSize + 4);
+        }
     }
 
-    @Override
-    public void keyTyped(KeyEvent e) {}
-
-    @Override
-    public void keyPressed(KeyEvent e) {
-        // Управление рамкой выбора
-        if (e.getKeyCode() == KeyEvent.VK_W || e.getKeyCode() == KeyEvent.VK_UP) {
-            player.selectedInvRow = Math.max(0, player.selectedInvRow - 1);
-        }
-        if (e.getKeyCode() == KeyEvent.VK_S || e.getKeyCode() == KeyEvent.VK_DOWN) {
-            player.selectedInvRow = Math.min(2, player.selectedInvRow + 1);
-        }
-        if (e.getKeyCode() == KeyEvent.VK_A || e.getKeyCode() == KeyEvent.VK_LEFT) {
-            player.selectedInvCol = Math.max(0, player.selectedInvCol - 1);
-        }
-        if (e.getKeyCode() == KeyEvent.VK_D || e.getKeyCode() == KeyEvent.VK_RIGHT) {
-            player.selectedInvCol = Math.min(5, player.selectedInvCol + 1);
-        }
-
-        /*
-        if (e.getKeyCode() == KeyEvent.VK_TAB) {
-            if (player.selectedHotbarSlot >= 0) {
+    private void transferItem() {
+        if (player.isSelectingHotbar) {
+            // Выбран слот в хотбаре → переносим в инвентарь
+            Item item = player.hotbar[player.selectedCol];
+            if (item != null && !item.isEmpty()) {
+                // Ищем первый свободный слот в инвентаре (сверху слева)
+                boolean placed = false;
+                for (int row = 0; row < 3 && !placed; row++) {
+                    for (int col = 0; col < 6; col++) {
+                        if (player.inventory[row][col] == null || player.inventory[row][col].isEmpty()) {
+                            player.inventory[row][col] = item;
+                            player.hotbar[player.selectedCol] = null;
+                            placed = true;
+                            break;
+                        }
+                    }
+                }
             }
-        }*/
-
-        if (e.getKeyCode() == KeyEvent.VK_ENTER) {
-            // выбран предмет в инвентаре
-            Item invItem = player.inventory[player.selectedInvRow][player.selectedInvCol];
-            if (invItem != null && !invItem.isEmpty()) {
+        } else {
+            // переносим в хотбар
+            Item item = player.inventory[player.selectedRow][player.selectedCol];
+            if (item != null && !item.isEmpty()) {
                 // Ищем пустой слот в хотбаре
                 int emptySlot = -1;
                 for (int i = 0; i < 6; i++) {
@@ -129,26 +124,56 @@ public class Inventory extends JPanel implements KeyListener {
                     }
                 }
                 if (emptySlot != -1) {
-                    player.hotbar[emptySlot] = invItem;
-                    player.inventory[player.selectedInvRow][player.selectedInvCol] = null;
-                }
-            } else {
-                // Выбран пустой слот в инвентаре; проверяем хотбар
-                Item hotbarItem = player.hotbar[player.selectedHotbarSlot];
-                if (hotbarItem != null && !hotbarItem.isEmpty()) {
-                    // Переносим в инвентарь без проверки места
-                    player.inventory[player.selectedInvRow][player.selectedInvCol] = hotbarItem;
-                    player.hotbar[player.selectedHotbarSlot] = null;
+                    player.hotbar[emptySlot] = item;
+                    player.inventory[player.selectedRow][player.selectedCol] = null;
                 }
             }
         }
+    }
 
-        if (e.getKeyCode() == KeyEvent.VK_E) {
-            parentFrame.remove(this);           // Удаляем инвентарь
-            parentFrame.add(gamePanel);         // Возвращаем игру
-            parentFrame.revalidate();           // Пересчитываем компоновку
-            parentFrame.repaint();              // Перерисовываем
-            gamePanel.requestFocusInWindow();   // Возвращаем фокус
+    private void backToGame() {
+        second.resumeTimers(player);
+        parentFrame.remove(this);
+        parentFrame.add(gamePanel);
+        parentFrame.revalidate();
+        parentFrame.repaint();
+        gamePanel.requestFocusInWindow();
+    }
+
+    @Override
+    public void keyTyped(KeyEvent e) {}
+
+    @Override
+    public void keyPressed(KeyEvent e) {
+        int key = e.getKeyCode();
+
+        if (key == KeyEvent.VK_W || key == KeyEvent.VK_UP) {
+            if (player.isSelectingHotbar) {
+                player.isSelectingHotbar = false;
+            } else {
+                player.selectedRow = Math.max(0, player.selectedRow - 1);
+            }
+        }
+        if (key == KeyEvent.VK_S || key == KeyEvent.VK_DOWN) {
+            if (!player.isSelectingHotbar && player.selectedRow == 2) {
+                player.isSelectingHotbar = true;
+            } else if (!player.isSelectingHotbar) {
+                player.selectedRow = Math.min(2, player.selectedRow + 1);
+            }
+        }
+        if (key == KeyEvent.VK_A || key == KeyEvent.VK_LEFT) {
+            player.selectedCol = Math.max(0, player.selectedCol - 1);
+        }
+        if (key == KeyEvent.VK_D || key == KeyEvent.VK_RIGHT) {
+            player.selectedCol = Math.min(5, player.selectedCol + 1);
+        }
+
+        if (key == KeyEvent.VK_ENTER) {
+            transferItem();
+        }
+
+        if (key == KeyEvent.VK_E) {
+            backToGame();
         }
 
         repaint();

@@ -3,21 +3,38 @@ import java.awt.*;
 import java.awt.event.KeyEvent;
 import java.awt.event.KeyListener;
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
+import java.util.List;
+import java.io.*;
 
 public class LocKamni extends JPanel implements KeyListener {
 
     Player player;
-    BufferedImage rect, fon, stoneImage, stoneItemImage, foodIcon, heartIcon, waterIcon;
+    BufferedImage rect, fon, stoneImage, stoneItemImage, foodIcon, heartIcon, waterIcon,
+            stakanEmptyImage, stakanFullImage, vodoemImage, brevnoImage, appleIcon;
+    BufferedImage enemyRight, enemyRightBack, enemyLeft, enemyLeftBack;
     BufferedImage buffer;
 
     private static final int PLAYER_WIDTH = 110;
     private static final int PLAYER_HEIGHT = 147;
     private static final int STONE_WIDTH = 75;
     private static final int STONE_HEIGHT = 80;
+    private static final int VODOEM_WIDTH = 200;
+    private static final int VODOEM_HEIGHT = 200;
+
+    private static final long ENEMY_SPAWN_INTERVAL = 12000;
+    private static final int SWORD_RANGE = PLAYER_WIDTH * 2;
+    private long lastAttackTime = 0;
+    private static final long ATTACK_COOLDOWN = 600;
+    private long hitFlashTime = 0;
+    private static final long HIT_FLASH_DURATION = 100;
+    private long swordFlashTime = 0;
+    private static final long SWORD_FLASH_DURATION = 200;
 
     private boolean isChopping = false;
     private long chopStartTime = 0;
-    private static final long CHOP_DURATION = 2000;
+    private static final long MINE_DURATION_PICKAXE = 3000;
+    private long currentMineDuration = -1; // -1 = нельзя добывать
     private int choppingStoneIndex = -1;
     private Timer gameTimer;
 
@@ -31,14 +48,14 @@ public class LocKamni extends JPanel implements KeyListener {
             {0.916, 0.000, 1.000, 0.310}
     };
 
-    public static int[][] stones = {
-            {400, 300},
-            {600, 200},
-            {800, 400},
-            {300, 500}
+    int[][] vodoems = {
+            {650, 50}
     };
 
-    double[][] exitPortals = {{0.15, 0.178, 0.01, 0.05}};
+    double[] kamlesPortals = {0.15, 0.178, 0.01, 0.05};
+    double[] bossPortals = {0.865, 0.188, 0.01, 0.05};
+
+    List<Enemy> enemies = new ArrayList<>();
 
     //конструктор
     public LocKamni(Player existingPlayer) {
@@ -57,6 +74,16 @@ public class LocKamni extends JPanel implements KeyListener {
         heartIcon = ImageLoader.loadImage("/assets/heart_icon.png");
         foodIcon = ImageLoader.loadImage("/assets/food_icon.png");
         waterIcon = ImageLoader.loadImage("/assets/water_icon.png");
+        vodoemImage = ImageLoader.loadImage("/assets/vodoem.png");
+        stakanEmptyImage = ImageLoader.loadImage("/assets/stakan_empty.png");
+        stakanFullImage = ImageLoader.loadImage("/assets/stakan_full.png");
+        enemyRight = ImageLoader.loadImage("/assets/enemyz.png");
+        enemyRightBack = ImageLoader.loadImage("/assets/enemy2z.png");
+        enemyLeft = ImageLoader.loadImage("/assets/enemy.png");
+        enemyLeftBack = ImageLoader.loadImage("/assets/enemy2.png");
+        brevnoImage = ImageLoader.loadImage("/assets/brevno.png");
+        appleIcon = ImageLoader.loadImage("/assets/apple_icon.png");
+
 
         /*
         if (this.player == null) {
@@ -69,15 +96,16 @@ public class LocKamni extends JPanel implements KeyListener {
             repaint();
         });
         gameTimer.start();
+        player.gameTimer = gameTimer;
 
         // Спавн - только если игрок новый
         if (player.x == 0 && player.y == 0) {
-            // Спавн в координатах карты
             player.x = 300;
             player.y = 420;
         }
 
         setVisible(true);
+        restoreItemIcons();
     }
 
     @Override
@@ -92,7 +120,6 @@ public class LocKamni extends JPanel implements KeyListener {
         g2d.setColor(Color.BLACK);
         g2d.fillRect(0, 0, getWidth(), getHeight());
 
-        // === ПРОПОРЦИОНАЛЬНОЕ МАСШТАБИРОВАНИЕ ===
         double targetAspect = (double) second.mapWidth / second.mapHeight;
         double currentAspect = (double) getWidth() / getHeight();
 
@@ -113,15 +140,33 @@ public class LocKamni extends JPanel implements KeyListener {
         // Фон
         g2d.drawImage(fon, offsetX, offsetY, drawWidth, drawHeight, null);
 
+        // Мигание при уроне
+        long now = System.currentTimeMillis();
+        if (now - hitFlashTime < HIT_FLASH_DURATION) {
+            g2d.setColor(new Color(255, 0, 0, 80));
+            g2d.fillRect(offsetX, offsetY, drawWidth, drawHeight);
+        }
+
         // Камни
         int drawStoneW = (int)((STONE_WIDTH / (double)second.mapWidth) * drawWidth);
         int drawStoneH = (int)((STONE_HEIGHT / (double)second.mapHeight) * drawHeight);
-        for (int i = 0; i < stones.length; i++) {
-            if (stones[i] != null) {
-                int screenX = offsetX + (int)((stones[i][0] / (double)second.mapWidth) * drawWidth);
-                int screenY = offsetY + (int)((stones[i][1] / (double)second.mapHeight) * drawHeight);
+        for (int i = 0; i < player.stones.length; i++) {
+            if (player.stones[i] != null) {
+                int screenX = offsetX + (int)((player.stones[i][0] / (double)second.mapWidth) * drawWidth);
+                int screenY = offsetY + (int)((player.stones[i][1] / (double)second.mapHeight) * drawHeight);
                 g2d.drawImage(stoneImage, screenX, screenY, drawStoneW, drawStoneH, null);
                 g2d.drawImage(stoneImage, screenX, screenY, null);
+            }
+        }
+
+        //водоем
+        int drawVodoemW = (int)((VODOEM_WIDTH / (double)second.mapWidth) * drawWidth);
+        int drawVodoemH = (int)((VODOEM_HEIGHT / (double)second.mapHeight) * drawHeight);
+        for (int i = 0; i < vodoems.length; i++) {
+            if (vodoems[i] != null) {
+                int screenX = offsetX + (int)((vodoems[i][0] / (double)second.mapWidth) * drawWidth);
+                int screenY = offsetY + (int)((vodoems[i][1] / (double)second.mapHeight) * drawHeight);
+                g2d.drawImage(vodoemImage, screenX, screenY, drawVodoemW, drawVodoemH, null);
             }
         }
 
@@ -134,6 +179,78 @@ public class LocKamni extends JPanel implements KeyListener {
             g2d.setColor(new Color(100, 255, 100, 100));
             g2d.fillRect(px, py, pw, ph);
         }*/
+
+        // Враги
+        for (Enemy e : enemies) {
+            int ex = e.x;
+            int ey = e.y;
+
+            // Вектор к игроку
+            int dx = player.x - ex;
+            int dy = player.y - ey;
+
+            BufferedImage enemySprite;
+
+            if (Math.abs(dx) > Math.abs(dy)) {
+                // Смотрит по горизонтали
+                if (dx > 0) {
+                    // Игрок справа - враг вправо
+                    // Определяем: лицо или спина?
+                    if (dy > 0) {
+                        // Игрок ниже - враг вперёд
+                        enemySprite = enemyRight;
+                    } else {
+                        // Игрок выше - враг назад
+                        enemySprite = enemyRightBack;
+                    }
+                } else {
+                    // Игрок слева - враг влево
+                    if (dy > 0) {
+                        enemySprite = enemyLeft;
+                    } else {
+                        enemySprite = enemyLeftBack;
+                    }
+                }
+            } else {
+                // Смотрит по вертикали — решаем по X
+                if (dx > 0) {
+                    // Игрок справа - враг вправо
+                    if (dy > 0) {
+                        enemySprite = enemyRight;
+                    } else {
+                        enemySprite = enemyRightBack;
+                    }
+                } else {
+                    // Игрок слева - враг влево
+                    if (dy > 0) {
+                        enemySprite = enemyLeft;
+                    } else {
+                        enemySprite = enemyLeftBack;
+                    }
+                }
+            }
+            int screenX = offsetX + (int)((ex / (double)mapWidth) * drawWidth);
+            int screenY = offsetY + (int)((ey / (double)mapHeight) * drawHeight);
+            int drawW = (int)((PLAYER_WIDTH / (double)mapWidth) * drawWidth);
+            int drawH = (int)((PLAYER_HEIGHT / (double)mapHeight) * drawHeight);
+            g2d.drawImage(enemySprite, screenX, screenY, drawW, drawH, null);
+
+            // Индикатор здоровья врага
+            int barWidth = drawW;
+            int barHeight = 5;
+            int barX = screenX;
+            int barY = screenY - 10;
+
+            g2d.setColor(Color.RED);
+            g2d.fillRect(barX, barY, barWidth, barHeight);
+            g2d.setColor(Color.BLACK);
+            g2d.drawRect(barX, barY, barWidth, barHeight);
+
+            // Зелёная часть (здоровье)
+            int currentHealthWidth = (int)((e.health / 2.0) * barWidth); // 2 — максимум
+            g2d.setColor(Color.GREEN);
+            g2d.fillRect(barX, barY, currentHealthWidth, barHeight);
+        }
 
         // Игрок
         int playerScreenX = offsetX + (int)((player.x / (double)second.mapWidth) * drawWidth);
@@ -149,19 +266,46 @@ public class LocKamni extends JPanel implements KeyListener {
         }
 
         // Прогресс-бар добычи
-        if (isChopping && choppingStoneIndex != -1 && stones[choppingStoneIndex] != null) {
-            int tx = offsetX + (int)((stones[choppingStoneIndex][0] / (double)second.mapWidth) * drawWidth);
-            int ty = offsetY + (int)((stones[choppingStoneIndex][1] / (double)second.mapHeight) * drawHeight);
+        if (isChopping && choppingStoneIndex != -1 && player.stones[choppingStoneIndex] != null) {
+            int tx = offsetX + (int)((player.stones[choppingStoneIndex][0] / (double)second.mapWidth) * drawWidth);
+            int ty = offsetY + (int)((player.stones[choppingStoneIndex][1] / (double)second.mapHeight) * drawHeight);
             int tw = (int)((stoneImage.getWidth() / (double)second.mapWidth) * drawWidth);
 
             long chopElapsed = System.currentTimeMillis() - chopStartTime;
-            float progress = Math.min(1.0f, (float) chopElapsed / CHOP_DURATION);
+            float progress = Math.min(1.0f, (float) chopElapsed / currentMineDuration);
             int barWidth = (int)(tw * progress);
 
             g2d.setColor(Color.YELLOW);
             g2d.fillRect(tx, ty - 10, barWidth, 5);
             g2d.setColor(Color.BLACK);
             g2d.drawRect(tx, ty - 10, tw, 5);
+        }
+
+        // Радиус атаки мечом
+        Item selectedItem = player.hotbar[player.selectedCol];
+        if (selectedItem != null && "sword".equals(selectedItem.type)) {
+            // Центр игрока
+            int centerX = offsetX + (int)((player.x + PLAYER_WIDTH / 2.0) / mapWidth * drawWidth);
+            int centerY = offsetY + (int)((player.y + PLAYER_HEIGHT / 2.0) / mapHeight * drawHeight);
+
+            // Радиус в экранных координатах
+            int screenRange = (int)((SWORD_RANGE / (double)mapWidth) * drawWidth);
+
+            // Проверяем, идёт ли анимация удара
+            now = System.currentTimeMillis();
+            boolean isFlashing = (now - swordFlashTime < SWORD_FLASH_DURATION);
+
+            if (isFlashing) {
+                // Анимация удара
+                g2d.setColor(new Color(255, 255, 0, 180)); // почти непрозрачный
+                g2d.setStroke(new BasicStroke(4));
+            } else {
+                // Обычный радиус
+                g2d.setColor(new Color(255, 255, 0, 80)); // полупрозрачный
+                g2d.setStroke(new BasicStroke(2));
+            }
+
+            g2d.drawOval(centerX - screenRange, centerY - screenRange, screenRange * 2, screenRange * 2);
         }
 
         drawUI(g2d);
@@ -172,35 +316,55 @@ public class LocKamni extends JPanel implements KeyListener {
 
     private void drawUI(Graphics2D g2d) {
         int slotSize = rect.getWidth();
+        int slotSpacing = 30;
         int startY = getHeight() - slotSize - 30;
-        int startX = (getWidth() - 6 * slotSize) / 2;
+        int startX = (getWidth() - (6 * slotSize + 5 * slotSpacing)) / 2;
+
+        // слоты хотбара и предметы
         for (int i = 0; i < 6; i++) {
-            int x = startX + i * (slotSize + 30);
+            int x = startX + i * (slotSize + slotSpacing);
             int y = startY;
             g2d.drawImage(rect, x, y, null);
+
+            Item item = player.hotbar[i];
+            if (item != null && !item.isEmpty()) {
+                // Иконка по центру слота
+                g2d.drawImage(item.icon, x + 18, y + 18, slotSize - 36, slotSize - 36, null);
+
+                // Количество в правом нижнем углу
+                g2d.setColor(Color.BLACK);
+                g2d.setFont(new Font("Arial", Font.BOLD, 14));
+                g2d.drawString(String.valueOf(item.count), x + slotSize - 21, y + slotSize - 8);
+            }
         }
 
+        // Рамка вокруг выбранного слота
+        int selX = startX + player.selectedCol * (slotSize + slotSpacing);
+        int selY = startY;
+        g2d.setColor(Color.YELLOW);
+        g2d.drawRect(selX - 2, selY - 2, slotSize + 4, slotSize + 4);
+
+        // Здоровье, голод, жажда
         int healthIcons = (player.health + 19) / 20;
         int iconSize = 38;
-        int spacing = 5;
+        int uiSpacing = 5;
         int y = 20;
 
         for (int i = 0; i < healthIcons; i++) {
-            g2d.drawImage(heartIcon, 60 + i * (iconSize + spacing), y, iconSize, iconSize, null);
+            g2d.drawImage(heartIcon, 60 + i * (iconSize + uiSpacing), y, iconSize, iconSize, null);
         }
 
         int hungerIcons = (player.hunger + 19) / 20;
         for (int i = 0; i < hungerIcons; i++) {
-            g2d.drawImage(foodIcon, 60 + i * (iconSize + spacing), y + iconSize + 10, iconSize, iconSize, null);
+            g2d.drawImage(foodIcon, 60 + i * (iconSize + uiSpacing), y + iconSize + 10, iconSize, iconSize, null);
         }
 
         int thirstIcons = (player.thirst + 19) / 20;
         for (int i = 0; i < thirstIcons; i++) {
-            g2d.drawImage(waterIcon, 60 + i * (iconSize + spacing), y + 2 * (iconSize + 10), iconSize, iconSize, null);
+            g2d.drawImage(waterIcon, 60 + i * (iconSize + uiSpacing), y + 2 * (iconSize + 10), iconSize, iconSize, null);
         }
-
-
     }
+
 
     @Override
     public void keyTyped(KeyEvent e) {}
@@ -247,14 +411,27 @@ public class LocKamni extends JPanel implements KeyListener {
             if (!isChopping) {
                 int stoneIndex = findNearbyStone();
                 if (stoneIndex != -1) {
-                    isChopping = true;
-                    chopStartTime = System.currentTimeMillis();
-                    choppingStoneIndex = stoneIndex;
+                    Item selectedItem = player.hotbar[player.selectedCol];
+                    if (selectedItem != null && "pickaxe".equals(selectedItem.type)) {
+                        isChopping = true;
+                        chopStartTime = System.currentTimeMillis();
+                        choppingStoneIndex = stoneIndex;
+                        currentMineDuration = MINE_DURATION_PICKAXE;
+                    } else {
+                        System.out.println("Нужна кирка!");
+                    }
+                }}
+
+            int vodoemIndex = findNearbyVodoem();
+            if (vodoemIndex != -1) {
+                Item selectedItem = player.hotbar[player.selectedCol];
+                if (selectedItem != null && "empty_cup".equals(selectedItem.type)) {
+                    selectedItem.type = "full_cup";
+                    selectedItem.icon = stakanFullImage;
+                    System.out.println("Набрали воды!");
                 }
             }
         }
-
-        if (key == KeyEvent.VK_ENTER) {}
 
         if (key == KeyEvent.VK_E) {
             JFrame frame = (JFrame) SwingUtilities.getWindowAncestor(this);
@@ -277,7 +454,36 @@ public class LocKamni extends JPanel implements KeyListener {
         }
 
         if (e.getKeyCode() >= KeyEvent.VK_1 && e.getKeyCode() <= KeyEvent.VK_6) {
-            player.selectedHotbarSlot = e.getKeyCode() - KeyEvent.VK_1;
+            player.selectedCol = e.getKeyCode() - KeyEvent.VK_1;
+            player.isSelectingHotbar = true;
+        }
+
+        if (key == KeyEvent.VK_ENTER) {
+            Item selectedItem = player.hotbar[player.selectedCol];
+            if (selectedItem != null && !selectedItem.isEmpty()) {
+                useItem(selectedItem);
+            }
+        }
+
+        if (key == KeyEvent.VK_F) {
+            Item selectedItem = player.hotbar[player.selectedCol];
+            if (selectedItem != null && "sword".equals(selectedItem.type)) {
+                attackWithSword();
+            }
+        }
+
+        if (key == KeyEvent.VK_Y) {
+            saveGame();
+        }
+
+        if (key == KeyEvent.VK_ESCAPE) {
+            JFrame frame = (JFrame) SwingUtilities.getWindowAncestor(this);
+            frame.remove(this); // ← УДАЛЯЕМ текущую панель
+            PauseMenu pauseMenu = new PauseMenu(frame, this, player);
+            frame.add(pauseMenu); // ← ДОБАВЛЯЕМ паузу
+            frame.revalidate();
+            frame.repaint();
+            pauseMenu.requestFocusInWindow();
         }
 
         repaint();
@@ -292,10 +498,8 @@ public class LocKamni extends JPanel implements KeyListener {
     }
 
     boolean isPlayerInPortal(double[][] portals) {
-        // Размер игрока в координатах карты
-        int pw = 142;
-        int ph = 190;
-
+        int pw = PLAYER_WIDTH;
+        int ph = PLAYER_HEIGHT;
         for (double[] p : portals) {
             int px = (int)(p[0] * second.mapWidth);
             int py = (int)(p[1] * second.mapHeight);
@@ -318,6 +522,11 @@ public class LocKamni extends JPanel implements KeyListener {
         frame.revalidate();
         frame.repaint();
         newLocation.requestFocusInWindow();
+        player.lastEnemySpawnTime = System.currentTimeMillis();
+        // Спавн врагов сразу при входе ночью
+        if (player.isNight) {
+            player.lastEnemySpawnTime = System.currentTimeMillis() - ENEMY_SPAWN_INTERVAL;
+        }
     }
 
     boolean checkCollision(int x, int y) {
@@ -342,10 +551,10 @@ public class LocKamni extends JPanel implements KeyListener {
     int findNearbyStone() {
         int pw = PLAYER_WIDTH;
         int ph = PLAYER_HEIGHT;
-        for (int i = 0; i < stones.length; i++) {
-            if (stones[i] != null) {
-                int tx = stones[i][0];
-                int ty = stones[i][1];
+        for (int i = 0; i < player.stones.length; i++) {
+            if (player.stones[i] != null) {
+                int tx = player.stones[i][0];
+                int ty = player.stones[i][1];
                 if (player.x + pw > tx && player.x < tx + STONE_WIDTH &&
                         player.y + ph > ty && player.y < ty + STONE_HEIGHT) {
                     return i;
@@ -355,24 +564,252 @@ public class LocKamni extends JPanel implements KeyListener {
         return -1;
     }
 
+    int findNearbyVodoem() {
+        int pw = PLAYER_WIDTH;
+        int ph = PLAYER_HEIGHT;
+        for (int i = 0; i < vodoems.length; i++) {
+            if (vodoems[i] != null) {
+                int vx = vodoems[i][0];
+                int vy = vodoems[i][1];
+                if (player.x + pw > vx && player.x < vx + VODOEM_WIDTH &&
+                        player.y + ph > vy && player.y < vy + VODOEM_HEIGHT) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private void useItem(Item item) {
+        if ("apple".equals(item.type)) {
+            player.hunger += 10;
+            if (player.hunger > 100) player.hunger = 100;
+            item.count -= 1;
+            if (item.count <= 0) {
+                player.hotbar[player.selectedCol] = null;
+            }
+            System.out.println("Съели яблоко! Голод: " + player.hunger);
+        }
+
+        if ("full_cup".equals(item.type)) {
+            player.thirst += 10;
+            if (player.thirst > 100) player.thirst = 100;
+            // Делаем стакан пустым
+            item.type = "empty_cup";
+            item.icon = stakanEmptyImage;
+            System.out.println("Выпили воды! Жажда: " + player.thirst);
+        }
+        if ("healing_potion".equals(item.type)) {
+            player.health += 20;
+            if (player.health > 100) player.health = 100;
+            item.count -= 1;
+            if (item.count <= 0) {
+                player.hotbar[player.selectedCol] = null;
+            }
+            System.out.println("Вылечились! Здоровье: " + player.health);
+        }
+    }
+
     private void updateGame() {
-        if (isPlayerInPortal(exitPortals)) {
+        if (isPlayerInPortal(new double[][]{kamlesPortals})) {
                 player.x = 1000;
                 player.y = 210;
                 switchToLocation(new second(player));
                 return;
             }
 
-        if (isChopping && choppingStoneIndex != -1 && stones[choppingStoneIndex] != null) {
+        /*
+            if (isPlayerInPortal(new double[][]{bossPortals})) {
+                player.x = 220;
+                player.y = 210;
+                switchToLocation(new BossLoc(player));
+                return;
+            }*/
+
+            if (isPlayerInPortal(new double[][]{bossPortals})) {
+                Item selectedItem = player.hotbar[player.selectedCol];
+                if (selectedItem != null && "key".equals(selectedItem.type)) {
+                    System.out.println("Ключ найден! Вход в логово босса...");
+                    player.x = 220;
+                    player.y = 210;
+                    switchToLocation(new BossLoc(player));
+                    return;
+                } else {
+                    System.out.println("Нужен ключ для входа!");
+                }
+            }
+
+        if (isChopping && choppingStoneIndex != -1 && player.stones[choppingStoneIndex] != null) {
             long now = System.currentTimeMillis();
             long elapsed = now - chopStartTime;
 
-            if (elapsed >= CHOP_DURATION) {
-                stones[choppingStoneIndex] = null;
+            if (elapsed >= currentMineDuration) {
+                player.stones[choppingStoneIndex] = null;
                 player.addItem(stoneItemImage, "stone", 1);
                 isChopping = false;
                 choppingStoneIndex = -1;
                 System.out.println("Камень добыт!");
+            }
+        }
+
+        // Спавн врагов
+        if (player.isNight) {
+            long now = System.currentTimeMillis();
+            if (now - player.lastEnemySpawnTime >= ENEMY_SPAWN_INTERVAL) {
+                spawnEnemy();
+                player.lastEnemySpawnTime = now;
+            }
+        } else {
+            if (!enemies.isEmpty()) {
+                enemies.clear();
+                System.out.println("Враги исчезли с рассветом.");
+            }
+        }
+
+        // Движение врагов
+        if (player.isNight) {
+            for (Enemy e : enemies) {
+                int ex = e.x;
+                int ey = e.y;
+
+                // Вектор к игроку
+                int dx = player.x - ex;
+                int dy = player.y - ey;
+                int speed = 3;
+
+                // Нормализация
+                if (Math.abs(dx) > Math.abs(dy)) {
+                    // Движение по X
+                    if (dx > 0) ex += speed; // вправо
+                    else ex -= speed;        // влево
+                } else {
+                    // Движение по Y
+                    if (dy > 0) ey += speed; // вниз
+                    else ey -= speed;        // вверх
+                }
+
+                // Проверка коллизии со стенами
+                if (!checkCollision(ex, ey)) {
+                    e.x = ex;
+                    e.y = ey;
+                }
+            }
+        }
+
+        // Проверка урона от врагов
+        if (player.isNight) {
+            for (Enemy e : enemies) {
+                // Проверяем касание (хитбоксы)
+                if (Math.abs(player.x - e.x) < PLAYER_WIDTH &&
+                        Math.abs(player.y - e.y) < PLAYER_HEIGHT) {
+
+                    long now = System.currentTimeMillis();
+                    if (now - player.lastHitTime >= Player.INVINCIBILITY_DURATION) {
+                        player.health -= 10;
+                        if (player.health < 0) player.health = 0;
+                        player.lastHitTime = now;
+                        hitFlashTime = now; // запускаем мигание
+                        System.out.println("Получен урон! Здоровье: " + player.health);
+                    }
+                }
+            }
+        }
+    }
+
+    private void attackWithSword() {
+        long now = System.currentTimeMillis();
+        if (now - lastAttackTime < ATTACK_COOLDOWN) {
+            return; // ещё нельзя атаковать
+        }
+        lastAttackTime = now;
+        swordFlashTime = now;
+
+        // Центр игрока
+        int playerCenterX = player.x + PLAYER_WIDTH / 2;
+        int playerCenterY = player.y + PLAYER_HEIGHT / 2;
+
+        for (Enemy e : enemies) {
+            // Центр врага
+            int enemyCenterX = e.x + PLAYER_WIDTH / 2;
+            int enemyCenterY = e.y + PLAYER_HEIGHT / 2;
+
+            // Расстояние между центрами
+            double dx = playerCenterX - enemyCenterX;
+            double dy = playerCenterY - enemyCenterY;
+            double distance = Math.sqrt(dx * dx + dy * dy);
+
+            if (distance <= SWORD_RANGE) {
+                e.health -= 1;
+                System.out.println("Враг ранен! Осталось HP: " + e.health);
+                if (e.health <= 0) {
+                    enemies.remove(e);
+                    System.out.println("Враг убит!");
+                }
+                break; // один удар - один враг
+            }
+        }
+    }
+
+    private void spawnEnemy() {
+        // Спавним 2 врагов
+        for (int i = 0; i < 2; i++) {
+            int attempts = 0;
+            final int MAX_ATTEMPTS = 10;
+
+            while (attempts < MAX_ATTEMPTS) {
+                // размер врага
+                int x = (int)(Math.random() * (mapWidth - PLAYER_WIDTH));
+                int y = (int)(Math.random() * (mapHeight - PLAYER_HEIGHT));
+
+                if (!checkCollision(x, y)) {
+                    enemies.add(new Enemy(x, y));
+                    System.out.println("Враг " + (i+1) + " появился на (" + x + ", " + y + ")");
+                    break; // выходим из while, переходим к следующему врагу
+                }
+                attempts++;
+            }
+            // Если не нашли место - пропускаем этого врага
+        }
+    }
+
+    private void saveGame() {
+        GameSave.save(player, 1); // 1 = пещера
+    }
+
+    private void restoreItemIcons() {
+        // Хотбар
+        for (int i = 0; i < 6; i++) {
+            Item item = player.hotbar[i];
+            if (item != null && item.icon == null) {
+                if ("wood".equals(item.type)) item.icon = brevnoImage;
+                else if ("apple".equals(item.type)) item.icon = appleIcon;
+                else if ("empty_cup".equals(item.type)) item.icon = stakanEmptyImage;
+                else if ("full_cup".equals(item.type)) item.icon = stakanFullImage;
+                else if ("sword".equals(item.type)) item.icon = ImageLoader.loadImage("/assets/mech.png");
+                else if ("axe".equals(item.type)) item.icon = ImageLoader.loadImage("/assets/topor.png");
+                else if ("pickaxe".equals(item.type)) item.icon = ImageLoader.loadImage("/assets/kirka.png");
+                else if ("acorn".equals(item.type)) item.icon = ImageLoader.loadImage("/assets/acorn.png");
+                else if ("torch".equals(item.type)) item.icon = ImageLoader.loadImage("/assets/fakel.png");
+                else if ("stone".equals(item.type)) item.icon = ImageLoader.loadImage("/assets/ruda_ugol.png");
+            }
+        }
+
+        // Инвентарь
+        for (int row = 0; row < 3; row++) {
+            for (int col = 0; col < 6; col++) {
+                Item item = player.inventory[row][col];
+                if (item != null && item.icon == null) {
+                    if ("wood".equals(item.type)) item.icon = brevnoImage;
+                    else if ("apple".equals(item.type)) item.icon = appleIcon;
+                    else if ("empty_cup".equals(item.type)) item.icon = stakanEmptyImage;
+                    else if ("full_cup".equals(item.type)) item.icon = stakanFullImage;
+                    else if ("sword".equals(item.type)) item.icon = ImageLoader.loadImage("/assets/mech.png");
+                    else if ("axe".equals(item.type)) item.icon = ImageLoader.loadImage("/assets/topor.png");
+                    else if ("pickaxe".equals(item.type)) item.icon = ImageLoader.loadImage("/assets/kirka.png");
+                    else if ("acorn".equals(item.type)) item.icon = ImageLoader.loadImage("/assets/acorn.png");
+                    else if ("torch".equals(item.type)) item.icon = ImageLoader.loadImage("/assets/fakel.png");
+                    else if ("stone".equals(item.type)) item.icon = ImageLoader.loadImage("/assets/ruda_ugol.png");
+                }
             }
         }
     }
